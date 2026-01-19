@@ -37,22 +37,28 @@ function withinRect(it, rect) {
  * Pick the correct title occurrence (SkyBreathe repeats titles).
  * We want the chart title in the KPI panel area, not the footer/AVG legend.
  */
-function findChartTitleItem(page, regex) {
+function findChartTitleItem(page, regex, opts = {}) {
   const r = regex instanceof RegExp ? regex : new RegExp(regex, "i");
 
-  const minY = page.height * 0.22; // below tiles
-  const maxY = page.height * 0.70; // above legends
+  const minYFrac = opts.minYFrac ?? 0.22;
+  const maxYFrac = opts.maxYFrac ?? 0.70;
+  const minX = opts.minX ?? -Infinity;
+  const maxX = opts.maxX ?? Infinity;
+
+  const minY = page.height * minYFrac;
+  const maxY = page.height * maxYFrac;
 
   const candidates = page.items
     .filter((it) => r.test(it.text))
-    .filter((it) => it.y > minY && it.y < maxY);
+    .filter((it) => it.y > minY && it.y < maxY)
+    .filter((it) => it.x >= minX && it.x <= maxX);
 
   if (!candidates.length) return null;
 
-  // choose top-most in that band (smallest y)
   candidates.sort((a, b) => a.y - b.y);
   return candidates[0];
 }
+
 
 /**
  * This is the critical fix:
@@ -306,8 +312,18 @@ export function parseBaseFromLayout(layout) {
   function parseTrend(page, key, titleRegex, mode) {
     if (!page) return;
 
-    const title = findChartTitleItem(page, titleRegex);
-    if (!title) return;
+    let title = findChartTitleItem(page, titleRegex);
+
+if (!title && key === "OETA_WA") {
+  title = findChartTitleItem(
+    page,
+    /OETA\s*[-–]?\s*WA/i,
+    { minYFrac: 0.12, maxYFrac: 0.78, minX: page.width * 0.70 }
+  );
+}
+
+if (!title) return;
+
 
     const rect = {
       x1: Math.max(0, title.x - 40),
