@@ -282,23 +282,24 @@ function formatGap(kpiKey, delta) {
 }
 
 function DebugCanvas({ file, title, regions }) {
-  const [imgUrl, setImgUrl] = useState(null);
+  const [img1, setImg1] = useState(null);
+  const [img2, setImg2] = useState(null);
   const [meta, setMeta] = useState(null);
 
-  async function build() {
+  async function buildPage(pageNumber) {
     if (!file) return;
-    const { canvas, width, height, scale } = await renderPdfPageToCanvas(file, 1, 1.1);
+
+    const { canvas, width, height, scale } = await renderPdfPageToCanvas(file, pageNumber, 1.1);
     setMeta({ width, height, scale });
 
-    // draw rectangles for page 1 only (simple, fast)
     const ctx = canvas.getContext("2d");
     ctx.lineWidth = 2;
     ctx.strokeStyle = "red";
     ctx.fillStyle = "red";
     ctx.font = "12px sans-serif";
 
-    const page1Regions = regions.filter(r => r.page === 1);
-    page1Regions.forEach((r) => {
+    const pageRegions = regions.filter((r) => r.page === pageNumber);
+    pageRegions.forEach((r) => {
       const x = r.rect.x1 * scale;
       const y = r.rect.y1 * scale;
       const w = (r.rect.x2 - r.rect.x1) * scale;
@@ -307,21 +308,40 @@ function DebugCanvas({ file, title, regions }) {
       ctx.fillText(`${r.key} b:${r.debug?.bases ?? "?"} v:${r.debug?.values ?? "?"}`, x + 4, y + 14);
     });
 
-    setImgUrl(canvas.toDataURL("image/png"));
+    const url = canvas.toDataURL("image/png");
+    if (pageNumber === 1) setImg1(url);
+    if (pageNumber === 2) setImg2(url);
   }
 
   return (
     <div className="debugBox">
       <div className="debugTitle">{title}</div>
-      <button className="btn smallBtn" onClick={build} disabled={!file}>
-        Render page 1 overlay
-      </button>
-      <button className="btn smallBtn" onClick={() => buildPage(2)} disabled={!file}>
-  Render page 2 overlay
-</button>
+
+      <div className="row" style={{ marginTop: 0 }}>
+        <button className="btn smallBtn" onClick={() => buildPage(1)} disabled={!file}>
+          Render page 1 overlay
+        </button>
+        <button className="btn smallBtn" onClick={() => buildPage(2)} disabled={!file}>
+          Render page 2 overlay
+        </button>
+      </div>
 
       {!file ? <div className="empty">Upload a PDF to render.</div> : null}
-      {imgUrl ? <img className="debugImg" src={imgUrl} alt="debug" /> : null}
+
+      {img1 ? (
+        <>
+          <div className="tiny" style={{ marginTop: 8 }}>Page 1</div>
+          <img className="debugImg" src={img1} alt="debug page 1" />
+        </>
+      ) : null}
+
+      {img2 ? (
+        <>
+          <div className="tiny" style={{ marginTop: 8 }}>Page 2</div>
+          <img className="debugImg" src={img2} alt="debug page 2" />
+        </>
+      ) : null}
+
       {meta ? <div className="tiny">Rendered: {Math.round(meta.width)}x{Math.round(meta.height)}</div> : null}
     </div>
   );

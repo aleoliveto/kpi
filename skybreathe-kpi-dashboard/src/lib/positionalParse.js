@@ -59,37 +59,23 @@ function findChartTitleItem(page, regex) {
  * define a rectangle that covers ONLY the chart panel (left or right column),
  * never full-width.
  */
-function chartRectFromTitle(page, titleItem, orderedTitles) {
+function chartRectFromTitle(page, titleItem) {
   const margin = 10;
 
-  // Fallback: if orderedTitles is missing, default to 2 columns using x
-  if (!orderedTitles || !orderedTitles.length) {
-    const cols = page.pageNumber === 1 ? 4 : 2;
-    const colW = page.width / cols;
-    const idx = Math.max(0, Math.min(cols - 1, Math.floor(titleItem.x / colW)));
-
-    const x1 = idx * colW + margin;
-    const x2 = (idx + 1) * colW - margin;
-    const y1 = titleItem.y + 8;
-   const y2 = Math.min(page.height - margin, titleItem.y + 560);
-
-    return { x1, y1, x2, y2 };
-  }
-
-  const cols = orderedTitles.length;
-  const idx = orderedTitles.indexOf(titleItem);
-
-  if (idx < 0) return null;
-
+  const cols = page.pageNumber === 1 ? 4 : 2;
   const colW = page.width / cols;
+
+  const idx = Math.max(0, Math.min(cols - 1, Math.floor(titleItem.x / colW)));
+
   const x1 = idx * colW + margin;
   const x2 = (idx + 1) * colW - margin;
+
   const y1 = titleItem.y + 8;
   const y2 = Math.min(page.height - margin, titleItem.y + 560);
 
-
   return { x1, y1, x2, y2 };
 }
+
 
 /**
  * Extract ranking from a chart panel:
@@ -257,13 +243,19 @@ const page1Titles = [
 ].filter(Boolean).sort((a,b) => a.x - b.x);
 
 
- function parseChart(page, key, titleRegex, mode, orderedTitles = []) {
+function parseChart(page, key, titleRegex, mode) {
   if (!page) return;
 
-  const title = findChartTitleItem(page, titleRegex);
+  let title = findChartTitleItem(page, titleRegex);
+
+  // Fallback for OETA_WA: title is often split into multiple items
+  if (!title && key === "OETA_WA") {
+    title = findChartTitleItem(page, /\bFY26\s*Target\s*80%\b/i);
+  }
+
   if (!title) return;
 
-  const rect = chartRectFromTitle(page, title, orderedTitles);
+  const rect = chartRectFromTitle(page, title);
   if (!rect) return;
 
   const target = extractTargetNearTitle(page, title, mode);
@@ -276,16 +268,17 @@ const page1Titles = [
 
 
 
+
   parseChart(p1, "OETD", /OETD\s+KPI\s+Performance/i, "PERCENT", page1Titles);
   parseChart(p1, "OETD_WA", /OETD[-–]?WA\s+KPI\s+Performance/i, "PERCENT", page1Titles);
   parseChart(p1, "OETA", /OETA\s+KPI\s+Performance/i, "PERCENT", page1Titles);
-  parseChart(
+ parseChart(
   p1,
   "OETA_WA",
   /(OETA[-–]?WA\s+KPI\s+Performance|EZY\s+OETA\s+without\s+APU\s+applied\s*\[AVG\])/i,
-  "PERCENT",
-  page1Titles
+  "PERCENT"
 );
+
 
 
 
