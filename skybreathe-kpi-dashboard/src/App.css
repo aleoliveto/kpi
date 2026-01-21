@@ -1,4 +1,3 @@
-/* App.css */
 :root {
   --bg: #f1f2f4;
   --surface: #ffffff;
@@ -9,7 +8,7 @@
   --good: #6f8f3a;
   --bad: #ff8c42;
   --border: #e5e7eb;
-  --shadow: 0 4px 14px rgba(0,0,0,0.08);
+  --shadow: 0 2px 8px rgba(0,0,0,0.08);
 }
 
 * {
@@ -21,7 +20,12 @@ body {
   font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
   background: var(--bg);
   color: var(--text);
+  font-size: 13px;
 }
+
+/* =======================
+   SHELL
+======================= */
 
 .sb-shell {
   display: flex;
@@ -29,30 +33,39 @@ body {
   width: 100vw;
 }
 
+/* =======================
+   LEFT NAV
+======================= */
+
 .sb-nav {
-  width: 72px;
+  width: 64px;
   background: var(--nav);
   color: #fff;
   display: flex;
   flex-direction: column;
   align-items: center;
-  padding: 12px 0;
+  padding: 10px 0;
 }
 
 .sb-nav-logo {
   font-weight: 900;
-  margin-bottom: 24px;
+  font-size: 14px;
+  margin-bottom: 20px;
 }
 
 .sb-nav-item {
-  padding: 10px;
-  font-size: 12px;
-  opacity: 0.7;
+  font-size: 11px;
+  padding: 8px 0;
+  opacity: 0.65;
 }
 
 .sb-nav-item.active {
   opacity: 1;
 }
+
+/* =======================
+   MAIN AREA
+======================= */
 
 .sb-main {
   flex: 1;
@@ -61,77 +74,125 @@ body {
   overflow: hidden;
 }
 
+/* =======================
+   TOP BAR
+======================= */
+
 .sb-topbar {
   background: #e5e7eb;
-  padding: 10px 16px;
+  padding: 6px 14px;
   display: flex;
-  justify-content: space-between;
   align-items: center;
+  justify-content: space-between;
+  border-bottom: 1px solid var(--border);
 }
 
 .filters,
 .actions {
   display: flex;
-  gap: 10px;
   align-items: center;
+  gap: 8px;
 }
 
 .filters select,
 .actions input[type="file"] {
-  padding: 6px 8px;
+  font-size: 12px;
+  padding: 4px 6px;
   border-radius: 6px;
   border: 1px solid var(--border);
+  background: #fff;
+  color: var(--text);
 }
 
-.actions button {
-  padding: 6px 12px;
-  border: 1px solid var(--border);
-  background: #fff;
-  cursor: pointer;
-  font-weight: 700;
+.toggle {
+  font-size: 12px;
+  display: flex;
+  align-items: center;
+  gap: 4px;
 }
+
+/* FIXED BUTTON VISIBILITY */
+.actions button {
+  font-size: 12px;
+  padding: 5px 10px;
+  border-radius: 6px;
+  border: 1px solid #c7c7c7;
+  background: #f9fafb;
+  color: #111827;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.actions button:hover {
+  background: #eef2f7;
+}
+
+.actions button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* =======================
+   CONTENT AREA
+======================= */
 
 .sb-content {
-  padding: 20px;
+  padding: 16px 20px;
   overflow-y: auto;
 }
 
-.sb-title {
-  font-size: 22px;
-  font-weight: 900;
-  margin-bottom: 16px;
+/* LIMIT WIDTH LIKE SKYBREATHE */
+.sb-content > * {
+  max-width: 1180px;
 }
+
+/* =======================
+   TITLE
+======================= */
+
+.sb-title {
+  font-size: 20px;
+  font-weight: 900;
+  margin-bottom: 14px;
+}
+
+/* =======================
+   KPI TILES
+======================= */
 
 .sb-kpi-tiles {
   display: grid;
   grid-template-columns: repeat(4, 1fr);
-  gap: 16px;
-  margin-bottom: 24px;
+  gap: 12px;
+  margin-bottom: 16px;
 }
 
 .sb-kpi-tile {
   background: var(--surface);
-  border-radius: 10px;
-  padding: 14px;
+  border-radius: 8px;
+  padding: 10px 12px;
   box-shadow: var(--shadow);
+  min-height: 90px;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
 }
 
 .sb-kpi-target {
-  font-size: 12px;
+  font-size: 11px;
   color: var(--muted);
-  margin-bottom: 6px;
 }
 
 .sb-kpi-label {
+  font-size: 13px;
+  font-weight: 800;
   color: var(--accent);
-  font-weight: 900;
-  margin-bottom: 10px;
 }
 
 .sb-kpi-value {
-  font-size: 28px;
+  font-size: 22px;
   font-weight: 900;
-  text-align: center;
+  line-height: 1;
 }
 
 .sb-kpi-value.good {
@@ -142,16 +203,23 @@ body {
   color: var(--bad);
 }
 
+/* =======================
+   KPI TABS
+======================= */
+
 .sb-tabs {
   display: flex;
-  gap: 8px;
-  margin-bottom: 16px;
+  gap: 6px;
+  margin-bottom: 12px;
 }
 
 .sb-tabs button {
-  padding: 6px 10px;
+  font-size: 11px;
+  padding: 4px 10px;
+  border-radius: 14px;
   border: 1px solid var(--border);
-  background: #fff;
+  background: #ffffff;
+  color: #111827;
   font-weight: 800;
   cursor: pointer;
 }
@@ -159,46 +227,59 @@ body {
 .sb-tabs button.active {
   border-color: var(--accent);
   color: var(--accent);
+  background: rgba(255,102,0,0.08);
 }
+
+/* =======================
+   RANKING PANEL
+======================= */
 
 .sb-ranking {
   background: var(--surface);
-  border-radius: 10px;
-  padding: 16px;
+  border-radius: 8px;
+  padding: 12px 14px;
   box-shadow: var(--shadow);
 }
 
 .sb-ranking h2 {
-  font-size: 16px;
+  font-size: 14px;
   font-weight: 900;
-  margin-bottom: 12px;
+  margin-bottom: 8px;
 }
+
+/* =======================
+   BARS – FIXED WIDTH + DENSITY
+======================= */
 
 .sb-bars {
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 4px;
+  max-width: 960px;   /* ⬅️ THIS IS THE KEY FIX */
 }
 
 .sb-bar-row {
   display: grid;
-  grid-template-columns: 60px 1fr 50px;
+  grid-template-columns: 60px 1fr 46px;
   gap: 8px;
   align-items: center;
+  padding: 4px 6px;
 }
 
 .sb-bar-row.selected {
-  background: rgba(255,102,0,0.08);
+  background: rgba(255,102,0,0.06);
 }
 
 .sb-bar-label {
+  font-size: 11px;
   font-weight: 700;
-  font-size: 12px;
 }
 
 .sb-bar-track {
-  height: 8px;
+  height: 6px;
   background: #e5e7eb;
+  position: relative;
+  overflow: hidden;
 }
 
 .sb-bar-fill {
@@ -214,19 +295,39 @@ body {
 }
 
 .sb-bar-value {
-  font-size: 12px;
-  text-align: right;
+  font-size: 11px;
   font-weight: 700;
+  text-align: right;
 }
+
+/* =======================
+   DEBUG PANEL
+======================= */
 
 .sb-debug {
   border-top: 1px solid var(--border);
-  padding: 12px;
   background: #fafafa;
+  padding: 10px 16px;
 }
 
+.sb-debug-panel h3 {
+  font-size: 13px;
+  font-weight: 900;
+  margin-bottom: 6px;
+}
+
+.sb-debug-panel button {
+  font-size: 11px;
+  padding: 4px 8px;
+}
+
+/* =======================
+   ERROR
+======================= */
+
 .sb-error {
-  color: #b00020;
-  padding: 8px 16px;
+  font-size: 12px;
   font-weight: 700;
+  color: #b00020;
+  padding: 6px 16px;
 }
