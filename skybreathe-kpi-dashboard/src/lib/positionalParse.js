@@ -1,3 +1,5 @@
+// src/lib/positionalParse.js
+
 const BASES = [
   "AMS","BOD","BCN","FCO","CDG","NTE","PMI","MXP","LYS","LIN","MAN","LIS","NAP","BHX",
   "LTN","NCE","GVA","LGW","LPL","BSL","ALC","BER","OPO","SEN","ORY","AGP","BFS","GLA","EDI","BRS",
@@ -34,14 +36,16 @@ function withinRect(it, rect) {
 }
 
 /**
- * Pick the correct title occurrence (SkyBreathe repeats titles).
- * We want the chart title in the KPI panel area, not the footer/AVG legend.
+ * Title detection with safe banding.
+ * Optional opts lets us widen Y band / filter by x for tricky panels.
+ * NOTE: titles are now optional (rects are deterministic), but we keep this for target extraction.
  */
 function findChartTitleItem(page, regex, opts = {}) {
+  if (!page) return null;
   const r = regex instanceof RegExp ? regex : new RegExp(regex, "i");
 
-  const minYFrac = opts.minYFrac ?? 0.22;
-  const maxYFrac = opts.maxYFrac ?? 0.70;
+  const minYFrac = opts.minYFrac ?? 0.18;
+  const maxYFrac = opts.maxYFrac ?? 0.74;
   const minX = opts.minX ?? -Infinity;
   const maxX = opts.maxX ?? Infinity;
 
@@ -59,15 +63,11 @@ function findChartTitleItem(page, regex, opts = {}) {
   return candidates[0];
 }
 
-
 /**
- * This is the critical fix:
- * define a rectangle that covers ONLY the chart panel (left or right column),
- * never full-width.
+ * Kept for reference / fallback only.
  */
 function chartRectFromTitle(page, titleItem) {
   const margin = 10;
-
   const cols = page.pageNumber === 1 ? 4 : 2;
   const colW = page.width / cols;
 
@@ -82,45 +82,82 @@ function chartRectFromTitle(page, titleItem) {
   return { x1, y1, x2, y2 };
 }
 
-
 /**
- * Extract ranking from a chart panel:
- * - bases: left side (known base codes only)
- * - values: right side (must be NN%)
- *
- * IMPORTANT:
- * - no decimal values (0.25 etc) because those are axis scale ticks for WA charts
- * - trim top/bottom modestly so we don't drop the bars
+ * Deterministic rects by KPI key
+ * Page 1: 4 columns (OETD, OETD_WA, OETA, OETA_WA)
  */
-function extractRankingFromRegion(page, rect, mode, key) {
- const rectW = rect.x2 - rect.x1;
+function chartRectPage1ByKey(page, key) {
+  const margin = 3;
+  const colW = page.width / 4;
 
-// default
-let leftBandMaxX = rect.x1 + rectW * 0.60;
-let rightBandMinX = rect.x1 + rectW * 0.48;
+  const idx =
+    key === "OETD" ? 0 :
+    key === "OETD_WA" ? 1 :
+    key === "OETA" ? 2 :
+    key === "OETA_WA" ? 3 :
+    null;
 
+  if (idx == null) return null;
 
-// OETD_WA panel needs wider capture: bases shift right, values shift left
-if (key === "OETD_WA") {
-  leftBandMaxX = rect.x1 + rectW * 0.66;
-  rightBandMinX = rect.x1 + rectW * 0.42;
+  const x1 = idx * colW + margin;
+  const x2 = (idx + 1) * colW - margin;
+
+  // match what you see on page 1: charts start a bit lower than tiles
+  const y1 = page.height * 0.24;
+  const y2 = page.height * 0.93;
+
+  return { x1, y1, x2, y2 };
 }
 
 
+/**
+ * Your proven formula for page 2.
+ * Note: you intentionally use width/4 and idx 0/1 and it works for your layout.
+ */
+function chartRectPage2ByKey(page, key) {
+  const margin = 3;
+  const colW = page.width / 4;
 
+  const idx = key === "DISC_FUEL" ? 1 : 0; // FLAP3 left, DISC_FUEL right
 
-const inner = {
-  x1: rect.x1,
-  x2: rect.x2,
-  y1: rect.y1 + 10,
-  y2: rect.y2 - 2,
-};
+  const x1 = idx * colW + margin;
+  const x2 = (idx + 1) * colW - margin;
 
+  // Page 2 layout: tiles at top, charts below
+  const y1 = page.height * 0.19; // below tiles
+  const y2 = page.height * 0.72; // above footer area
 
+  return { x1, y1, x2, y2 };
+}
+
+function extractRankingFromRegion(page, rect, mode, key) {
+  const rectW = rect.x2 - rect.x1;
+
+  // defaults
+  let leftBandMaxX = rect.x1 + rectW * 0.60;
+  let rightBandMinX = rect.x1 + rectW * 0.48;
+
+  // WA panels shift: capture wider
+  /*if (key === "OETD_WA" || key === "OETA_WA") {
+    leftBandMaxX = rect.x1 + rectW * 0.66;
+    rightBandMinX = rect.x1 + rectW * 0.40;
+  }
+
+  // OETA bottom rows: values can sit a bit left
+ if (key === "OETA") {
+    rightBandMinX = rect.x1 + rectW * 0.44;
+  }
+*/
+  const inner = {
+    x1: rect.x1,
+    x2: rect.x2,
+    y1: rect.y1 + 10,
+    y2: rect.y2 - 2,
+  };
 
   const regionItems = page.items.filter((it) => withinRect(it, inner));
 
-  // Bases (keep y for pairing)
+  // Bases
   const baseItems = sortTopToBottom(
     regionItems.filter((it) => BASE_SET.has(it.text) && it.x <= leftBandMaxX)
   );
@@ -133,7 +170,7 @@ const inner = {
     bases.push({ base: it.text, y: it.y });
   }
 
-  // Values (keep y for pairing)
+  // Values
   let valueItems = [];
   if (mode === "PERCENT") {
     valueItems = sortTopToBottom(
@@ -146,7 +183,8 @@ const inner = {
     ).map((it) => ({ y: it.y, value: toInt(it.text) }));
   } else {
     valueItems = sortTopToBottom(
-      regionItems.filter((it) => it.x >= rightBandMinX && (isKgText(it.text) || /^\d{2,5}$/.test(it.text)))
+      regionItems
+        .filter((it) => it.x >= rightBandMinX && (isKgText(it.text) || /^\d{2,5}$/.test(it.text)))
     ).map((it) => ({ y: it.y, value: cleanFuelNumber(toInt(it.text)) }));
   }
 
@@ -176,48 +214,48 @@ const inner = {
     }
   }
 
-  // If we didn't get all rows, try again with a relaxed y tolerance
-if (ranking.length < 30 && bases.length === 30 && valueItems.length >= 30) {
-  const used2 = new Array(valueItems.length).fill(false);
-  const ranking2 = [];
-  maxDY = 24;
+  // Relaxed pass if bases=30 but we didn't pair all
+  if (ranking.length < 30 && bases.length === 30 && valueItems.length >= 30) {
+    const used2 = new Array(valueItems.length).fill(false);
+    const ranking2 = [];
+    maxDY = 26;
 
-  for (const b of bases) {
-    let bestIdx = -1;
-    let bestDY = Infinity;
+    for (const b of bases) {
+      let bestIdx = -1;
+      let bestDY = Infinity;
 
-    for (let i = 0; i < valueItems.length; i++) {
-      if (used2[i]) continue;
-      const dy = Math.abs(valueItems[i].y - b.y);
-      if (dy < bestDY) {
-        bestDY = dy;
-        bestIdx = i;
+      for (let i = 0; i < valueItems.length; i++) {
+        if (used2[i]) continue;
+        const dy = Math.abs(valueItems[i].y - b.y);
+        if (dy < bestDY) {
+          bestDY = dy;
+          bestIdx = i;
+        }
+      }
+
+      if (bestIdx >= 0 && bestDY <= maxDY) {
+        used2[bestIdx] = true;
+        ranking2.push({ base: b.base, value: valueItems[bestIdx].value });
       }
     }
 
-    if (bestIdx >= 0 && bestDY <= maxDY) {
-      used2[bestIdx] = true;
-      ranking2.push({ base: b.base, value: valueItems[bestIdx].value });
+    if (ranking2.length > ranking.length) {
+      return { ranking: ranking2, debug: { bases: bases.length, values: valueItems.length } };
     }
   }
-
-  if (ranking2.length > ranking.length) {
-    return { ranking: ranking2, debug: { bases: bases.length, values: valueItems.length } };
-  }
-}
 
   return { ranking, debug: { bases: bases.length, values: valueItems.length } };
 }
 
 /**
- * Target near title (FY26 Target X%)
+ * Target near title (best case)
  */
 function extractTargetNearTitle(page, titleItem, type) {
   const rect = {
-    x1: Math.max(0, titleItem.x - 40),
-    y1: titleItem.y - 10,
-    x2: Math.min(page.width, titleItem.x + 260),
-    y2: Math.min(page.height, titleItem.y + 60),
+    x1: Math.max(0, titleItem.x - 60),
+    y1: titleItem.y - 14,
+    x2: Math.min(page.width, titleItem.x + 320),
+    y2: Math.min(page.height, titleItem.y + 80),
   };
 
   const items = page.items.filter((it) => withinRect(it, rect));
@@ -233,7 +271,65 @@ function extractTargetNearTitle(page, titleItem, type) {
 }
 
 /**
- * Network PDF parser (page 1 charts + page 2 charts)
+ * Fallback target: scan the top band of the deterministic rect
+ */
+function extractTargetFromRectTopBand(page, rect, mode) {
+  const topBand = {
+    x1: rect.x1,
+    x2: rect.x2,
+    y1: rect.y1 - 60,
+    y2: rect.y1 + 90,
+  };
+  const items = page.items.filter((it) => withinRect(it, topBand));
+  const joined = items.map((i) => i.text).join(" ");
+
+  if (mode === "PERCENT") {
+    const m = /FY26\s*Target\s*(\d{1,3})\s*%/i.exec(joined);
+    return m ? toInt(m[1]) : null;
+  } else {
+    const m = /FY26\s*Target\s*(\d{1,5})\s*kg/i.exec(joined);
+    return m ? toInt(m[1]) : null;
+  }
+}
+
+/**
+ * Network avg from the top tiles (page 1 only)
+ */
+function extractNetworkAvgFromTiles(page, key) {
+  if (!page) return null;
+
+  const tileRowY1 = page.height * 0.06;
+  const tileRowY2 = page.height * 0.30;
+
+  const cols = 4;
+  const colW = page.width / cols;
+
+  const tileIdxByKey = {
+    OETD: 0,
+    OETD_WA: 1,
+    OETA: 2,
+    OETA_WA: 3,
+  };
+
+  const idx = tileIdxByKey[key];
+  if (idx == null) return null;
+
+  const rect = {
+    x1: idx * colW + 10,
+    x2: (idx + 1) * colW - 10,
+    y1: tileRowY1,
+    y2: tileRowY2,
+  };
+
+  const items = page.items.filter((it) => withinRect(it, rect));
+
+  const pct = items.find((it) => isPercentText(it.text));
+  if (!pct) return null;
+  return toInt(pct.text);
+}
+
+/**
+ * Network PDF parser
  */
 export function parseNetworkFromLayout(layout) {
   const p1 = layout.pages.find((p) => p.pageNumber === 1);
@@ -241,135 +337,58 @@ export function parseNetworkFromLayout(layout) {
 
   const kpis = {};
   const debugRegions = [];
-const page1Titles = [
-  findChartTitleItem(p1, /OETD\s+KPI\s+Performance/i),
-  findChartTitleItem(p1, /OETD-WA\s+KPI\s+Performance/i),
-  findChartTitleItem(p1, /OETA\s+KPI\s+Performance/i),
-  findChartTitleItem(p1, /OETA-WA\s+KPI\s+Performance/i),
-].filter(Boolean).sort((a,b) => a.x - b.x);
 
+  function parseChart(page, key, titleRegex, mode) {
+    if (!page) return;
 
-function parseChart(page, key, titleRegex, mode) {
-  if (!page) return;
+    // Deterministic rects ensure boxes always appear
+    let rect = null;
+    if (page.pageNumber === 1) {
+      rect = chartRectPage1ByKey(page, key);
+    } else if (page.pageNumber === 2) {
+      rect = chartRectPage2ByKey(page, key);
+    }
+    if (!rect) return;
 
-  let title = findChartTitleItem(page, titleRegex);
+    // Title is optional now (used mainly for target)
+    const title = findChartTitleItem(page, titleRegex);
 
-  // Fallback for OETA_WA: title is often split into multiple items
-  if (!title && key === "OETA_WA") {
-    title = findChartTitleItem(page, /\bFY26\s*Target\s*80%\b/i);
+    const target = title
+      ? extractTargetNearTitle(page, title, mode)
+      : extractTargetFromRectTopBand(page, rect, mode);
+
+    const { ranking, debug } = extractRankingFromRegion(page, rect, mode, key);
+
+    const networkAvg =
+      page.pageNumber === 1 && (key === "OETD" || key === "OETD_WA" || key === "OETA" || key === "OETA_WA")
+        ? extractNetworkAvgFromTiles(page, key)
+        : null;
+
+    debugRegions.push({ page: page.pageNumber, key, rect, debug });
+
+    if (ranking) kpis[key] = { target, networkAvg, ranking };
   }
 
-  if (!title) return;
+  // Page 1
+  parseChart(p1, "OETD", /OETD\s+KPI\s+Performance/i, "PERCENT");
+  parseChart(p1, "OETD_WA", /OETD[-–]?WA\s+KPI\s+Performance/i, "PERCENT");
+  parseChart(p1, "OETA", /OETA\s+KPI\s+Performance/i, "PERCENT");
+  parseChart(
+    p1,
+    "OETA_WA",
+    /(OETA[-–]?WA\s+KPI\s+Performance|EZY\s+OETA\s+without\s+APU\s+applied\s*\[AVG\])/i,
+    "PERCENT"
+  );
 
-  const rect = chartRectFromTitle(page, title);
-  if (!rect) return;
-
-  const target = extractTargetNearTitle(page, title, mode);
-  const { ranking, debug } = extractRankingFromRegion(page, rect, mode, key);
-
-  debugRegions.push({ page: page.pageNumber, key, rect, debug });
-
-  if (ranking) kpis[key] = { target, ranking };
-}
-
-
-
-
-  parseChart(p1, "OETD", /OETD\s+KPI\s+Performance/i, "PERCENT", page1Titles);
-  parseChart(p1, "OETD_WA", /OETD[-–]?WA\s+KPI\s+Performance/i, "PERCENT", page1Titles);
-  parseChart(p1, "OETA", /OETA\s+KPI\s+Performance/i, "PERCENT", page1Titles);
- parseChart(
-  p1,
-  "OETA_WA",
-  /(OETA[-–]?WA\s+KPI\s+Performance|EZY\s+OETA\s+without\s+APU\s+applied\s*\[AVG\])/i,
-  "PERCENT"
-);
-
-
-
-
+  // Page 2
   parseChart(p2, "FLAP3", /Flap\s+3/i, "PERCENT");
-  parseChart(p2, "DISC_FUEL", /Discretionary\s+Fuel/i, "KG", []);
-
+  parseChart(p2, "DISC_FUEL", /Discretionary\s+Fuel/i, "KG");
 
   const bases = Array.from(
     new Set(Object.values(kpis).flatMap((k) => (k.ranking || []).map((r) => r.base)))
   );
 
   return { kpis, bases, debugRegions };
-}
-
-/**
- * Base PDF parser (latest = right-most label)
- */
-export function parseBaseFromLayout(layout) {
-  const p1 = layout.pages.find((p) => p.pageNumber === 1);
-  const p2 = layout.pages.find((p) => p.pageNumber === 2);
-
-  const kpis = {};
-  const debugRegions = [];
-
-  function parseTrend(page, key, titleRegex, mode) {
-    if (!page) return;
-
-    let title = findChartTitleItem(page, titleRegex);
-
-if (!title && key === "OETA_WA") {
-  title = findChartTitleItem(
-    page,
-    /OETA\s*[-–]?\s*WA/i,
-    { minYFrac: 0.12, maxYFrac: 0.78, minX: page.width * 0.70 }
-  );
-}
-
-if (!title) return;
-
-
-    const rect = {
-      x1: Math.max(0, title.x - 40),
-      x2: page.width - 20,
-      y1: title.y + 10,
-      y2: Math.min(page.height, title.y + 320),
-    };
-
-    const regionItems = page.items.filter((it) => withinRect(it, rect));
-
-    let candidates = [];
-    if (mode === "PERCENT") {
-      candidates = regionItems
-        .filter((it) => isPercentText(it.text) && !isAxisPercentTick(it.text))
-        .map((it) => ({ x: it.x, y: it.y, v: toInt(it.text) }))
-        .filter((x) => x.v != null);
-    } else {
-      candidates = regionItems
-        .filter((it) => isKgText(it.text) || /^\d{2,5}$/.test(it.text))
-        .map((it) => ({ x: it.x, y: it.y, v: cleanFuelNumber(toInt(it.text)) }))
-        .filter((x) => x.v != null);
-    }
-
-    candidates.sort((a, b) => b.x - a.x);
-    const latest = candidates.length ? candidates[0].v : null;
-
-    debugRegions.push({ page: page.pageNumber, key, rect, points: candidates.length });
-
-    if (latest != null) {
-      kpis[key] = { latest };
-    }
-  }
-
-  const anyText = [...(p1?.items || []), ...(p2?.items || [])].map((i) => i.text).join(" ");
-  const m = /\bEZY\s+([A-Z]{3})\b/i.exec(anyText);
-  const detectedBase = m ? m[1].toUpperCase() : null;
-
-  parseTrend(p1, "OETD", /\bEZY\s+[A-Z]{3}\s+OETD\s+KPI\b/i, "PERCENT");
-  parseTrend(p1, "OETA", /\bEZY\s+[A-Z]{3}\s+OETA\s+KPI\b/i, "PERCENT");
-  parseTrend(p1, "FLAP3", /\bEZY\s+[A-Z]{3}\s+Flap\s+3\s+KPI\b/i, "PERCENT");
-  parseTrend(p1, "DISC_FUEL", /\bEZY\s+[A-Z]{3}\s+Discretionary\s+Fuel\s+KPI\b/i, "KG");
-
-  parseTrend(p2, "OETA_WA", /\bEZY\s+[A-Z]{3}\s+OETA-WA\s+KPI\b/i, "PERCENT");
-  parseTrend(p2, "OETD_WA", /\bEZY\s+[A-Z]{3}\s+OETD-WA\s+KPI\b/i, "PERCENT");
-
-  return { detectedBase, kpis, debugRegions };
 }
 
 export const KNOWN_BASES = BASES;

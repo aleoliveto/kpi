@@ -1,9 +1,9 @@
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
+import html2canvas from "html2canvas";
 import "./App.css";
 import { extractPdfLayout, renderPdfPageToCanvas } from "./lib/pdfPos";
-import { KNOWN_BASES, parseNetworkFromLayout, parseBaseFromLayout } from "./lib/positionalParse";
+import { KNOWN_BASES, parseNetworkFromLayout } from "./lib/positionalParse";
 import { buildPseudonymMapFromRanking, maskRanking } from "./lib/gdpr";
-
 
 const KPI_LIST = [
   { key: "OETD", label: "OETD" },
@@ -16,7 +16,6 @@ const KPI_LIST = [
 
 export default function App() {
   const [networkFile, setNetworkFile] = useState(null);
-  const [baseFile, setBaseFile] = useState(null);
 
   const [selectedBase, setSelectedBase] = useState("SEN");
   const [activeKpi, setActiveKpi] = useState("OETD");
@@ -27,65 +26,80 @@ export default function App() {
   const [err, setErr] = useState("");
 
   const [networkData, setNetworkData] = useState(null);
-  const [baseData, setBaseData] = useState(null);
   const [netDebug, setNetDebug] = useState(null);
-  const [baseDebug, setBaseDebug] = useState(null);
+
+  const exportRef = useRef(null);
+  const exportRefRankingOnly = useRef(null);
 
   const networkTarget = networkData?.kpis?.[activeKpi]?.target ?? null;
-const networkAvg = networkData?.kpis?.[activeKpi]?.networkAvg ?? null;
-
+  const networkAvg = networkData?.kpis?.[activeKpi]?.networkAvg ?? null;
 
   const pseudonymMap = useMemo(() => {
-  const raw = networkData?.kpis?.[activeKpi]?.ranking || [];
-  if (!raw.length) return new Map();
-  return buildPseudonymMapFromRanking(raw, selectedBase);
-}, [networkData, activeKpi, selectedBase]);
+    const raw = networkData?.kpis?.[activeKpi]?.ranking || [];
+    if (!raw.length) return new Map();
+    return buildPseudonymMapFromRanking(raw, selectedBase);
+  }, [networkData, activeKpi, selectedBase]);
 
+  const ranking = useMemo(() => {
+    const raw = networkData?.kpis?.[activeKpi]?.ranking || [];
+    return hideOtherBases ? maskRanking(raw, pseudonymMap, selectedBase) : raw;
+  }, [networkData, activeKpi, hideOtherBases, pseudonymMap, selectedBase]);
 
- const ranking = useMemo(() => {
-  const raw = networkData?.kpis?.[activeKpi]?.ranking || [];
-  return hideOtherBases ? maskRanking(raw, pseudonymMap, selectedBase) : raw;
-}, [networkData, activeKpi, hideOtherBases, pseudonymMap, selectedBase]);
-
-
-  const selectedBaseValue = baseData?.kpis?.[activeKpi]?.latest ?? null;
-
-  async function onProcess() {
+  async function onProcessNetworkOnly() {
     setErr("");
-    if (!networkFile || !baseFile) {
-      setErr("Please upload both PDFs.");
+    if (!networkFile) {
+      setErr("Please upload the Network PDF.");
       return;
     }
 
     setLoading(true);
     try {
       const netLayout = await extractPdfLayout(networkFile);
-      const baseLayout = await extractPdfLayout(baseFile);
-
       const netParsed = parseNetworkFromLayout(netLayout);
-      const baseParsed = parseBaseFromLayout(baseLayout);
 
       setNetworkData(netParsed);
-      setBaseData(baseParsed);
-
       setNetDebug({ layout: netLayout, regions: netParsed.debugRegions });
-      setBaseDebug({ layout: baseLayout, regions: baseParsed.debugRegions });
-
-      if (baseParsed?.detectedBase && KNOWN_BASES.includes(baseParsed.detectedBase)) {
-        setSelectedBase(baseParsed.detectedBase);
-      }
 
       if (!Object.keys(netParsed.kpis || {}).length) {
         setErr("Network KPIs not detected. Turn on Debug mode and check which regions are being found.");
       }
+
+      // Guardrail
+      for (const k of Object.keys(netParsed.kpis || {})) {
+        const rows = netParsed.kpis[k]?.ranking?.length ?? 0;
+        if (rows && rows !== 30) {
+          setErr(`Parser warning: ${k} has ${rows}/30 rows. This is a parser bug (x-bands/rect/title), not UI.`);
+          break;
+        }
+      }
     } catch (e) {
-      setErr(e?.message || "Failed to parse PDFs.");
+      setErr(e?.message || "Failed to parse Network PDF.");
       setNetworkData(null);
-      setBaseData(null);
       setNetDebug(null);
-      setBaseDebug(null);
     } finally {
       setLoading(false);
+    }
+  }
+
+  async function exportNewsletterImages() {
+    setErr("");
+    if (!networkData) {
+      setErr("Process the Network PDF first.");
+      return;
+    }
+
+    try {
+      // 1) Full “newsletter block” (cards + ranking)
+      if (exportRef.current) {
+        await exportDomToPng(exportRef.current, `SkyBreathe_${activeKpi}_newsletter.png`);
+      }
+
+      // 2) Ranking only (useful for tight newsletter layouts)
+      if (exportRefRankingOnly.current) {
+        await exportDomToPng(exportRefRankingOnly.current, `SkyBreathe_${activeKpi}_ranking.png`);
+      }
+    } catch (e) {
+      setErr(e?.message || "Export failed.");
     }
   }
 
@@ -94,8 +108,9 @@ const networkAvg = networkData?.kpis?.[activeKpi]?.networkAvg ?? null;
       <header className="header">
         <div>
           <div className="title">SkyBreathe KPI Dashboard</div>
-          <div className="subtitle">Position-based parsing with debug overlay.</div>
+          <div className="subtitle">Client-side PDF positional parsing (no OCR). Network PDF only.</div>
         </div>
+        <div className="brandPill">easyJet style</div>
       </header>
 
       <section className="card">
@@ -108,17 +123,12 @@ const networkAvg = networkData?.kpis?.[activeKpi]?.networkAvg ?? null;
           </div>
 
           <div>
-            <label className="label">Base PDF</label>
-            <input type="file" accept="application/pdf" onChange={(e) => setBaseFile(e.target.files?.[0] || null)} />
-            <FileBadge file={baseFile} />
-            <div className="hint">EZY base KPI Dashboard export</div>
-          </div>
-
-          <div>
             <label className="label">Selected base</label>
             <select className="input" value={selectedBase} onChange={(e) => setSelectedBase(e.target.value)}>
               {KNOWN_BASES.map((b) => (
-                <option key={b} value={b}>{b}</option>
+                <option key={b} value={b}>
+                  {b}
+                </option>
               ))}
             </select>
 
@@ -136,13 +146,19 @@ const networkAvg = networkData?.kpis?.[activeKpi]?.networkAvg ?? null;
               </label>
             </div>
           </div>
-        </div>
 
-        <div className="row">
-          <button className="btn" onClick={onProcess} disabled={loading}>
-            {loading ? "Processing..." : "Process PDFs"}
-          </button>
-          {err ? <div className="error">{err}</div> : null}
+          <div className="actions">
+            <button className="btn primary" onClick={onProcessNetworkOnly} disabled={loading}>
+              {loading ? "Processing..." : "Process Network PDF"}
+            </button>
+
+            <button className="btn ghost" onClick={exportNewsletterImages} disabled={!networkData}>
+              Export newsletter images
+            </button>
+
+            {err ? <div className="error">{err}</div> : null}
+            <div className="hint subtle">Exports PNGs of the UI graphics (cards + ranking). Paste into Outlook.</div>
+          </div>
         </div>
       </section>
 
@@ -154,66 +170,49 @@ const networkAvg = networkData?.kpis?.[activeKpi]?.networkAvg ?? null;
               className={`tab ${activeKpi === k.key ? "active" : ""}`}
               onClick={() => setActiveKpi(k.key)}
               disabled={!networkData}
+              title={k.label}
             >
-              {k.key}
+              {k.label}
             </button>
           ))}
         </div>
 
-        <div className="compare">
-          <div className="panel">
-            <div className="panelTitle">Network ranking</div>
-            <div className="small">
-  Rows: {ranking.length} / Raw: {networkData?.kpis?.[activeKpi]?.ranking?.length ?? 0}
-</div>
-
-            {!networkData ? (
-              <div className="empty">Upload and process PDFs to see results.</div>
-            ) : (
-              <RankingChart items={ranking} kpiKey={activeKpi} selectedBase={selectedBase} />
-            )}
+        {/* Export-ready wrapper */}
+        <div ref={exportRef} className="newsletterBlock">
+          <div className="newsletterHeader">
+            <div className="newsletterTitle">
+              Network KPI snapshot: <span className="accent">{activeKpiLabel(activeKpi)}</span>
+            </div>
+            <div className="newsletterMeta">
+              Rows: <strong>{ranking.length}</strong> / Raw:{" "}
+              <strong>{networkData?.kpis?.[activeKpi]?.ranking?.length ?? 0}</strong>
+            </div>
           </div>
 
-          <div className="panel">
-            <div className="panelTitle">Selected base</div>
+          <div className="kpiGrid2">
+            <KpiCard label="Base" value={selectedBase} />
+            <KpiCard label="Target" value={networkTarget != null ? formatKpi(activeKpi, networkTarget) : "—"} />
+            <KpiCard label="Network avg" value={networkAvg != null ? formatKpi(activeKpi, networkAvg) : "—"} />
+            <KpiCard
+              label="Gap vs target"
+              value={
+                networkAvg != null && networkTarget != null ? formatGap(activeKpi, networkAvg - networkTarget) : "—"
+              }
+              tone="muted"
+            />
+          </div>
 
-<div className="kpiGrid">
-  <div className="kpiCard">
-    <div className="kpiLabel">Base</div>
-    <div className="kpiValue">{selectedBase}</div>
-  </div>
-
-  <div className="kpiCard">
-    <div className="kpiLabel">Latest</div>
-    <div className="kpiValue">
-      {selectedBaseValue != null ? formatKpi(activeKpi, selectedBaseValue) : "—"}
-    </div>
-  </div>
-
-  <div className="kpiCard">
-    <div className="kpiLabel">Target</div>
-    <div className="kpiValue">
-      {networkTarget != null ? formatKpi(activeKpi, networkTarget) : "—"}
-    </div>
-  </div>
-
-  <div className="kpiCard">
-    <div className="kpiLabel">Network avg</div>
-    <div className="kpiValue">
-      {networkAvg != null ? formatKpi(activeKpi, networkAvg) : "—"}
-    </div>
-  </div>
-</div>
-
-<div className="gapLine">
-  <span>Gap vs target:</span>
-  <strong>
-    {selectedBaseValue != null && networkTarget != null
-      ? formatGap(activeKpi, selectedBaseValue - networkTarget)
-      : "—"}
-  </strong>
-</div>
-
+          <div className="compareOne">
+            <div className="panel">
+              <div className="panelTitle">Network ranking (all bases)</div>
+              {!networkData ? (
+                <div className="empty">Upload and process a Network PDF to see results.</div>
+              ) : (
+                <div ref={exportRefRankingOnly}>
+                  <RankingChart items={ranking} kpiKey={activeKpi} selectedBase={selectedBase} />
+                </div>
+              )}
+            </div>
           </div>
         </div>
       </section>
@@ -223,10 +222,10 @@ const networkAvg = networkData?.kpis?.[activeKpi]?.networkAvg ?? null;
           <div className="panelTitle">Debug overlay</div>
           <div className="debugGrid">
             <DebugCanvas file={networkFile} title="Network PDF" regions={netDebug?.regions || []} />
-            <DebugCanvas file={baseFile} title="Base PDF" regions={baseDebug?.regions || []} />
           </div>
           <div className="small">
-            If a KPI is not extracted, check whether its region rectangle is appearing and whether bases/values counts match.
+            If a KPI is not extracted, check whether its region rectangle is appearing and whether bases/values counts
+            match (must be 30).
           </div>
         </section>
       ) : null}
@@ -234,6 +233,21 @@ const networkAvg = networkData?.kpis?.[activeKpi]?.networkAvg ?? null;
       <footer className="footer">
         <span>Client-side parsing. PDFs stay in your browser.</span>
       </footer>
+    </div>
+  );
+}
+
+function activeKpiLabel(key) {
+  if (key === "DISC_FUEL") return "Discretionary Fuel";
+  if (key === "FLAP3") return "Flap 3";
+  return key.replace("_", "-");
+}
+
+function KpiCard({ label, value, tone }) {
+  return (
+    <div className={`kpiCard2 ${tone === "muted" ? "muted" : ""}`}>
+      <div className="kpiLabel2">{label}</div>
+      <div className="kpiValue2">{value}</div>
     </div>
   );
 }
@@ -274,11 +288,28 @@ function formatKpi(kpiKey, v) {
   if (kpiKey === "DISC_FUEL") return `${Math.round(v)} kg`;
   return `${Math.round(v)}%`;
 }
+
 function formatGap(kpiKey, delta) {
   if (delta == null) return "";
   if (kpiKey === "DISC_FUEL") return `${Math.round(delta)} kg`;
   const sign = delta > 0 ? "+" : "";
   return `${sign}${Math.round(delta)}%`;
+}
+
+async function exportDomToPng(domNode, filename) {
+  const canvas = await html2canvas(domNode, {
+    backgroundColor: "#ffffff",
+    scale: 2,
+    useCORS: true,
+  });
+
+  const dataUrl = canvas.toDataURL("image/png");
+  const a = document.createElement("a");
+  a.href = dataUrl;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
 }
 
 function DebugCanvas({ file, title, regions }) {
@@ -296,7 +327,7 @@ function DebugCanvas({ file, title, regions }) {
     ctx.lineWidth = 2;
     ctx.strokeStyle = "red";
     ctx.fillStyle = "red";
-    ctx.font = "12px sans-serif";
+    ctx.font = "12px system-ui";
 
     const pageRegions = regions.filter((r) => r.page === pageNumber);
     pageRegions.forEach((r) => {
@@ -318,10 +349,10 @@ function DebugCanvas({ file, title, regions }) {
       <div className="debugTitle">{title}</div>
 
       <div className="row" style={{ marginTop: 0 }}>
-        <button className="btn smallBtn" onClick={() => buildPage(1)} disabled={!file}>
+        <button className="btn smallBtn ghost" onClick={() => buildPage(1)} disabled={!file}>
           Render page 1 overlay
         </button>
-        <button className="btn smallBtn" onClick={() => buildPage(2)} disabled={!file}>
+        <button className="btn smallBtn ghost" onClick={() => buildPage(2)} disabled={!file}>
           Render page 2 overlay
         </button>
       </div>
@@ -330,19 +361,27 @@ function DebugCanvas({ file, title, regions }) {
 
       {img1 ? (
         <>
-          <div className="tiny" style={{ marginTop: 8 }}>Page 1</div>
+          <div className="tiny" style={{ marginTop: 8 }}>
+            Page 1
+          </div>
           <img className="debugImg" src={img1} alt="debug page 1" />
         </>
       ) : null}
 
       {img2 ? (
         <>
-          <div className="tiny" style={{ marginTop: 8 }}>Page 2</div>
+          <div className="tiny" style={{ marginTop: 8 }}>
+            Page 2
+          </div>
           <img className="debugImg" src={img2} alt="debug page 2" />
         </>
       ) : null}
 
-      {meta ? <div className="tiny">Rendered: {Math.round(meta.width)}x{Math.round(meta.height)}</div> : null}
+      {meta ? (
+        <div className="tiny">
+          Rendered: {Math.round(meta.width)}x{Math.round(meta.height)}
+        </div>
+      ) : null}
     </div>
   );
 }
